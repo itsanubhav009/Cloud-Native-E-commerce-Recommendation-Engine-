@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = credentials('aws-account-id')
+        AWS_REGION = 'us-east-1'
+        ECR_REPOSITORY_API = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/recommendation-api"
+        ECR_REPOSITORY_FRONTEND = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/recommendation-frontend"
+        KUBECONFIG = credentials('eks-kubeconfig')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                sh 'pip install -r requirements.txt'
+                sh 'pytest -v'
+            }
+        }
+        
+        stage('Build and Push API Image') {
+            steps {
+                script {
+                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                    sh "docker build -t ${ECR_REPOSITORY_API}:${env.BUILD_NUMBER} -t ${ECR_REPOSITORY_API}:latest ."
+                    sh "docker push ${ECR_REPOSITORY_API}:${env.BUILD_NUMBER}"
+                    sh "docker push ${ECR_REPOSITORY_API}:latest"
+                }
+            }
+        }
+        
+        stage('Build and Push Frontend Image') {
+            steps {
+                script {
+                    dir('frontend') {
+                        sh "docker build -t ${ECR_REPOSITORY_FRONTEND}:${env.BUILD_NUMBER} -t ${ECR_REPOSITORY_FRONTEND}:latest ."
+                        sh "docker push ${ECR_REPOSITORY_FRONTEND}:${env.BUILD_NUMBER}"
+                        sh "docker push ${ECR_REPOSITORY_FRONTEND}:latest"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh "export KUBECONFIG=${KUBECONFIG}"
+                    
+                    // Update deployment images
+                    sh "kubectl set image deployment/recommendation-api api=${ECR_REPOSITORY_API}:${env.BUILD_NUMBER} --record"
+                    sh "kubectl set image deployment/recommendation-frontend frontend=${ECR_REPOSITORY_FRONTEND}:${env.BUILD_NUMBER} --record"
+                    
+                    // Check deployment status
+                    sh "kubectl rollout status deployment/recommendation-api"
+                    sh "kubectl rollout status deployment/recommendation-frontend"
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Deployment successful!'
+        }
+        failure {
+            echo 'Deployment failed!'
+        }
+    }
+}

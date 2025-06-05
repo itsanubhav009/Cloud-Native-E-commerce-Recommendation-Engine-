@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommendation-frontend
+  labels:
+    app: recommendation-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: recommendation-frontend
+  template:
+    metadata:
+      labels:
+        app: recommendation-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: ${ECR_REPOSITORY_URI}/recommendation-frontend:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: REACT_APP_API_URL
+          value: https://api.yourdomain.com
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  selector:
+    app: recommendation-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
